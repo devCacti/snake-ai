@@ -1,0 +1,21 @@
+# File Types
+*.pyc
+*.pyo
+*.pyd
+
+# Folders
+__pycache__/
+.ipynb_checkpoints/
+
+# Virtual Environments
+venv/
+env/
+.idea/
+.vscode/
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
+
+# Logs and Databases
+logs/
+*.log
