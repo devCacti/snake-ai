@@ -1,27 +1,32 @@
 # Snake AI
 
-Another attempt **(#2)** at creating a **Snake AI Agent** that is capable of filling an entire game board on its own.
+Another attempt **(#2)** at creating an **AI Snake Agent** that is capable of filling an entire game board on its own.
+
+**If you wish to run training on your computer, I recommend you make sure you have no thermal issues.**
+
+The training code will easily reach 100% on your GPU if you push training to use as much GPU as you have. The training code is so efficient that I got my GPU to reach >85ºC.
+
+# Setup Guide
 
 ## Requirements
 
 > The installation of the python libraries listed below will be explained in the setup guide.
 
-* Python 3.12.3 (If you use WSL, this should be installed by default)
-    * JAX [Cuda 12]
-    * FLAX
-    * OPTAX
-    * Pillow
-* WSL 2 - Ubuntu (The guide focuses on WSL Setup)
+- Python 3.12.3 (If you use WSL, this should be installed by default)
+  - JAX [Cuda 12]
+  - FLAX
+  - OPTAX
+  - Pillow
+- WSL 2 - Ubuntu (The guide focuses on WSL Setup)
 
 ## Optional Requirements (Recommended)
+
 > Please note that the following recommendations are based on what I use and is working for me, things could be different for other systems. In theory you don't need any of this to run training or replays.
 
-* NVIDIA GPU - *The more VRAM and Cores the better*
-* CUDA Toolkit 12.8
-* Cudnn 9 - *Python will install this, check the setup guide*
-* VSCode
-
-# Setup Guide
+- **NVIDIA GPU** - _The more VRAM and Cores the better_
+- **CUDA Toolkit 12.8** - _Python might install this, but it wasn't tested_
+- **Cudnn 9** - _Python will install this, check the setup guide_
+- **Visual Studio Code** - _This is my recommendation, if you wish, you can use a different IDE_
 
 ### **This guide assumes you are using Windows 10/11**
 
@@ -30,6 +35,7 @@ Another attempt **(#2)** at creating a **Snake AI Agent** that is capable of fil
 > You should be able to just copy and paste most of these commands
 
 ## 1. First Steps (If you wish to use the GPU)
+
 > These steps you will have to do on your own.
 
 Go to **NVIDIA's Cuda Toolkit** Website and download **Cuda Toolkit 12.8**, this is one of the most important steps in order to use your GPU, **you have to have an NVIDIA GPU** though, pretty sure AMD GPUs don't work for this.
@@ -40,12 +46,11 @@ Then follow the instructions on the website.
 
 ![Download Cuda Toolkit 12.8](git_images/download_cudatoolkit.png)
 
-
 ## 2. Enabling and Installing WSL2
 
 To enable WSL2 you have to **make sure you have virtualization enabled** on your PC. And then you might ask:
 
-> "*Why not a Virtual Machine then?*"
+> "_Why not a Virtual Machine then?_"
 
 Well, I never managed to get GPU usage inside a virtual machine and WSL2 gets it without needing any setup.
 
@@ -135,10 +140,11 @@ devcacti@devCacti:~/devcacti_projects$ cd snake-ai/
 devcacti@devCacti:~/devcacti_projects/snake-ai$
 ```
 
-### 3.3. Create a Python Virtual Environment 
+### 3.3. Create a Python Virtual Environment
+
 You could skip this part, but I genuinely do not recommend.
 
-This is the sequence of commands you should run before you create a *venv*:
+This is the sequence of commands you should run before you create a _venv_:
 
 ```bash
 # To make sure everything is up-to-date
@@ -181,6 +187,7 @@ Now that you installed everything, you should be able to run training, I do howe
 ```bash
 python3 src/train.py
 ```
+
 With this simple command, training will start on its own, if you did everything correctly, you should see the following lines appear on the screen:
 
 ![Functional Training](git_images/run_training.png)
@@ -191,12 +198,10 @@ Also, make sure your GPU is the one being used and not the CPU, the CPU should b
 
 ![GPU Usage during Training](git_images/gpu_usage_example.png)
 
-
 ### Let me know if there is anything you want to know or if you can't solve a problem on your end.
 
-### **Before creating an issue, please check if there is already an issue regarding your problem.**
----
----
+### **Before creating an issue, please check if there is already an issue (even closed ones) regarding your problem.**
+
 ---
 
 # Previous Attempt (#1)
@@ -207,7 +212,7 @@ This repository is made in an attempt to improve what was already done in the fo
 
 That previously made repository was my first attempt at learning concepts in the AI world. Starting off trying to use libraries like **TensorFlow** and **PyTorch**, ended up using **PyTorch** as it allowed me to use GPU power without needing the use of **WSL**.
 
-*Quite ironic huh*.
+_Quite ironic huh_.
 
 Don't get me wrong, the previous method already made a pretty capable agent however, not good enough. You can check out [this LinkedIn post](https://www.linkedin.com/posts/tiago-laim_ai-reinforcementlearning-activity-7358916807518220288-yMyv?utm_source=share&utm_medium=member_desktop&rcm=ACoAAE_W0fYBrVrybKNltf4r7K6nzMGxUPRSza4) to see what I mean, even though it's not the latest version of the project, certainly was a successful one.
 
@@ -219,7 +224,7 @@ Yet with the lack of observations the agent had, it could never achieve a comple
 
 One of the main reasons to me putting this project to the side was mainly school and career choices. But certainly the most important one was the **lack of motivation**. The way that I was training the agents was so wasteful and ineffective that I started losing any sort of motivation to continue trying to improve.
 
-> *I guess this repository should serve as an example for people to not give up their dreams. **Take your time**.*
+> _I guess this repository should serve as an example for people to not give up their dreams. **Take your time**._
 
 Before, training consisted in using too much Python logic, which meant that whatever action the GPU decided had to be sent back to the CPU for checks, for example, `If Snake[0] hits wall then reset`. Just the time it took for the information to be sent back the CPU and then to the GPU was so big that the CPU training on its own could probably do it faster.
 

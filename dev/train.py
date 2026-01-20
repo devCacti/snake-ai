@@ -21,7 +21,7 @@ from model import create_network
 import time
 # --- HYPERPARAMETERS ---
 TOTAL_STEPS = 250_000_000     # Increased from 500k to 5M (Standard for PPO)
-NUM_ENVS = 512              # Increased from 512 for better batch stats
+NUM_ENVS = 256              # Increased from 512 for better batch stats
 STEPS_PER_EPOCH = 64        # Shorter rollouts (was 128)
 LEARNING_RATE = 3e-4        # Slightly higher for CNN
 GAMMA = 0.999
