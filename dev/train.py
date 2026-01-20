@@ -1,52 +1,47 @@
 import os
 
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+#os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 #os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".60"
 #os.environ["XLA_FLAGS"] = "--xla_gpu_strict_conv_algorithm_picker=false"
 #os.environ["XLA_FLAGS"] = "--xla_gpu_autotune_level=0"
 
-os.environ["XLA_FLAGS"] = (
-    os.environ.get("XLA_FLAGS", "") + 
-    " --xla_gpu_strict_conv_algorithm_picker=false"
-)
+#os.environ["XLA_FLAGS"] = (
+#    os.environ.get("XLA_FLAGS", "") + 
+#    " --xla_gpu_strict_conv_algorithm_picker=false"
+#)
 
 
 import jax
 import jax.numpy as jnp
 import optax
-from flax.training.train_state import TrainState
+from flax.training.train_state import TrainState # type: ignore
 from snake_env import reset, step_batch as step, GRID_SIZE
 from model import create_network
 import time
 # --- HYPERPARAMETERS ---
-TOTAL_STEPS = 5_000_000   # Increased from 500k to 5M (Standard for PPO)
-NUM_ENVS = 8           # Increased from 512 for better batch stats
-STEPS_PER_EPOCH = 64      # Shorter rollouts (was 128)
-LEARNING_RATE = 3e-4      # Slightly higher for CNN
-GAMMA = 0.99
+TOTAL_STEPS = 250_000_000     # Increased from 500k to 5M (Standard for PPO)
+NUM_ENVS = 512              # Increased from 512 for better batch stats
+STEPS_PER_EPOCH = 64        # Shorter rollouts (was 128)
+LEARNING_RATE = 3e-4        # Slightly higher for CNN
+GAMMA = 0.999
 GAE_LAMBDA = 0.95
-ENTROPY_COEF = 0.05       # Higher entropy to prevent "spinning in circles"
+ENTROPY_COEF = 0.02         # Higher entropy to prevent "spinning in circles"
 CRITIC_COEF = 0.5
 
 # --- NEW PPO CONFIGURATION ---
-PPO_EPOCHS = 4            # Number of times to reuse data
-NUM_MINIBATCHES = 8       # Split batch into 8 chunks for stability
+PPO_EPOCHS = 2              # Number of times to reuse data (Default: 4)
+NUM_MINIBATCHES = 4         # Split batch into 8 chunks for stability (Default: 8)
 
 # Calculated Batch Sizes (Add this so the code knows how to split)
 BATCH_SIZE = NUM_ENVS * STEPS_PER_EPOCH
 MINIBATCH_SIZE = BATCH_SIZE // NUM_MINIBATCHES
 NUM_UPDATES = TOTAL_STEPS // BATCH_SIZE
 
-class TrainState(TrainState):
+class TrainState(TrainState): # type: ignore
     key: jax.Array
 
-# --- HELPER: Turn State into GPS Coordinates ---
-# --- HELPER: Relative GPS Coordinates ---
-# train.py
 
-# Remove the old GPS math. 
-# We just want the raw grid state (Snake Body + Food).
 def get_obs(state):
     # Returns shape (Batch, 10, 10, 2)
     return state.grid.astype(jnp.float32)
@@ -56,7 +51,7 @@ def create_train_state(rng, learning_rate):
     
     # OLD: dummy_input = jnp.zeros((1, 4))
     # NEW: Dummy input matches the Grid Shape (Batch, 10, 10, 2)
-    dummy_input = jnp.zeros((1, 10, 10, 2)) 
+    dummy_input = jnp.zeros((1, GRID_SIZE, GRID_SIZE, 1)) 
     
     params = model.init(rng, dummy_input)
     tx = optax.adam(learning_rate)
@@ -77,7 +72,7 @@ def rollout(train_state, env_state):
         log_prob = jax.nn.log_softmax(logits)[jnp.arange(NUM_ENVS), action]
         
         # 3. Step
-        next_e_state, reward, done = step(e_state, action)
+        next_e_state, reward, done = step(e_state, action) # type: ignore
         
         # --- CRITICAL FIX: Time Penalty ---
         # Penalize existing (-0.01) so it wants to eat FAST.
@@ -175,7 +170,7 @@ def run_training():
         
         # Note: We reshape obs to (Batch_Size, 10, 10, 2) for the CNN
         traj_batch = (
-            obs.reshape((BATCH_SIZE, 100, 100, 2)), 
+            obs.reshape((BATCH_SIZE, GRID_SIZE, GRID_SIZE, 1)), 
             flatten(actions).squeeze(),
             flatten(advantages).squeeze(),
             flatten(targets).squeeze(),
@@ -224,7 +219,7 @@ def run_training():
     print(f"Training Started for {TOTAL_STEPS:,.0f} steps...")
     start = time.time()
     
-    (final_state, _), (metrics, rewards) = train_scan(train_state, env_state)
+    (final_state, _), rewards = train_scan(train_state, env_state)
     
     # IMPORTANT: Force JAX to finish all math before stopping the clock
     rewards.block_until_ready()

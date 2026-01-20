@@ -3,97 +3,125 @@ import jax.numpy as jnp
 from snake_env import reset, step, GRID_SIZE
 from model import create_network
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont  # <--- Added ImageDraw
 import pickle
 import time
 
+# --- HYPERPARAMETERS ---
+MAX_STEPS = 5000
+
 # --- SETUP ---
-# We need to make sure we use the same architecture as training
 model = create_network()
 
-def run_simulation(params):
-    # 1. Init one environment
-    current_time_seed = int(time.time() * 1000)
-    key = jax.random.PRNGKey(current_time_seed)
-
-    print(f"Playing Game Seed: {current_time_seed}")
-    state = reset(key)
+# --- THE "GOD MODE" SIMULATOR ---
+@jax.jit
+def run_game_scan(params, rng_key):
+    init_state = reset(rng_key)
     
-    frames = []
-    
-    # Run for 1000 steps max
-    for _ in range(1000):
-        # Save the grid for the GIF
-        frames.append(state.grid)
-        
-        # --- FIX: USE THE GRID, NOT GPS ---
-        # The model now expects (Batch, 10, 10, 2)
-        # We take the grid from the state
+    def scan_step(state, _):
         obs = state.grid.astype(jnp.float32)
-        
-        # Add batch dim: (10, 10, 2) -> (1, 10, 10, 2)
         logits, _ = model.apply(params, obs[None, ...])
-        
-        # DEBUG: Print logits to ensure they aren't all identical
-        # print(f"Logits: {logits[0]}") 
-
         action = jnp.argmax(logits[0])
-        
-        # 3. Step
-        state, reward, done = step(state, action)
-        
-        if done:
-            print("Snake died!")
-            break
-            
-    return frames
+        next_state, reward, done = step(state, action) #type: ignore
+        return next_state, (state.grid, done)
+
+    # Run for a guaranteed long time
+    final_state, (all_frames, all_dones) = jax.lax.scan(
+        scan_step, init_state, None, length=MAX_STEPS
+    )
     
+    return all_frames, all_dones
+
 def save_gif(frames, filename="replay.gif"):
-    print(f"Saving {len(frames)} frames...")
+    print(f"Transferring {len(frames)} frames to CPU...")
+    frames_np = np.array(frames) # Shape (N, 10, 10, 1)
+    
+    print("Rendering GIF with values...")
     pil_images = []
     
-    for grid in frames:
-        # grid is (10, 10, 2)
-        grid = np.array(grid)
+    # Calculate cell size for the upscaled image (300 / 10 = 30px per block)
+    upscale_size = 300
+    cell_size = upscale_size // GRID_SIZE
+    
+    # Optional: Load a font (default is fine, but this is cleaner)
+    try:
+        # Try to load a standard font if available, else default
+        font = ImageFont.load_default()
+    except:
+        font = None
+
+    for grid in frames_np:
+        # grid shape is (10, 10, 1)
+        layer = grid[..., 0] 
         
-        # 1. Extract Channels
-        snake_channel = grid[..., 0] # Values from 0.0 to 1.0
-        food_channel = grid[..., 1]  # Values 0.0 or 1.0
-        
-        # 2. Create RGB Canvas
-        # Shape (10, 10, 3)
         img = np.zeros((GRID_SIZE, GRID_SIZE, 3), dtype=np.uint8)
         
-        # 3. Render Snake (Green Gradient)
-        # We simply multiply the float value (0.0 to 1.0) by 255.
-        # This automatically makes the head bright and the tail dark.
-        snake_intensity = (snake_channel * 255).astype(np.uint8)
-        img[..., 1] = snake_intensity  # Set Green Channel
+        # 1. RENDER SNAKE (Positive Values)
+        snake_vals = np.maximum(layer, 0.0)
+        snake_intensity = (snake_vals * 255).astype(np.uint8)
+        img[..., 1] = snake_intensity 
         
-        # 4. Render Food (Red)
-        # Food is binary, so we just set it to 255 where active.
-        img[food_channel > 0.5] = [255, 0, 0] # Red
+        # 2. RENDER FOOD (Negative Values)
+        is_food = layer < -0.1
+        img[is_food] = [255, 0, 0] # Set Red
         
-        # 5. Optional: Highlight the Head Explicitly (Blue pixel?)
-        # If you want the head to really pop, you can add this:
-        # head_mask = snake_channel >= 0.99
-        # img[head_mask] = [0, 255, 255] # Cyan Head
+        # 3. UPSCALE
+        pil_img = Image.fromarray(img).resize((upscale_size, upscale_size), resample=Image.NEAREST) #type: ignore
         
-        # Upscale for visibility
-        pil_img = Image.fromarray(img).resize((300, 300), resample=Image.NEAREST)
+        # 4. DRAW NUMBERS
+        draw = ImageDraw.Draw(pil_img)
+        
+        for y in range(GRID_SIZE):
+            for x in range(GRID_SIZE):
+                val = layer[y, x]
+                
+                # Only draw if not 0.0 (Empty) to keep it clean
+                if abs(val) > 0.001:
+                    # Format: 2 decimal places (e.g., 0.99, -1.0)
+                    text = f"{val:.2f}"
+                    
+                    # Center the text in the 30x30 cell
+                    # (Simple centering logic)
+                    pos_x = x * cell_size + 2
+                    pos_y = y * cell_size + 10
+                    
+                    # Draw White Text
+                    draw.text((pos_x, pos_y), text, fill=(255, 255, 255), font=font)
+
         pil_images.append(pil_img)
         
-    pil_images[0].save(filename, save_all=True, append_images=pil_images[1:], duration=100, loop=0)
+    pil_images[0].save(filename, save_all=True, append_images=pil_images[1:], duration=100, loop=0) # Slower duration (100ms) to read numbers
     print(f"Saved to {filename}")
 
 if __name__ == "__main__":
-    # 1. Load the trained weights
     print("Loading weights...")
     with open("snake_params.pkl", "rb") as f:
         params = pickle.load(f)
-        
-    # 2. Run
-    frames = run_simulation(params)
+
+    current_time_seed = int(time.time() * 1000)
+    key = jax.random.PRNGKey(current_time_seed)
+    print(f"Playing Game Seed: {current_time_seed}")
     
-    # 3. Save
-    save_gif(frames, "snake_replay.gif")
+    t0 = time.time()
+    # This will now return 5000 frames
+    all_frames, all_dones = run_game_scan(params, key) 
+    
+    dones_np = np.array(all_dones)
+    t1 = time.time()
+    
+    # Logic to trim the empty tail of the video
+    if np.any(dones_np):
+        death_idx = np.argmax(dones_np)
+        print(f"Game ended at step {death_idx + 1}!")
+        frames_to_save = all_frames[:death_idx+1]
+    else:
+        print(f"Snake survived all {MAX_STEPS} steps (Infinite Loop?)")
+        frames_to_save = all_frames
+
+    save_gif(frames_to_save, "snake_replay.gif")
+    t2 = time.time()
+    
+    print(f"\n=== SPEED REPORT ===")
+    print(f"Simulation (GPU): {t1 - t0:.4f}s")
+    print(f"GIF Creation:     {t2 - t1:.4f}s")
+    print(f"Total Time:       {t2 - t0:.4f}s")
