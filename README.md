@@ -11,7 +11,7 @@ Another attempt **(#2)** at creating a **Snake AI Agent** that is capable of fil
     * FLAX
     * OPTAX
     * Pillow
-* WSL 2 - Ubuntu (The guide only explains for WSL)
+* WSL 2 - Ubuntu (The guide focuses on WSL Setup)
 
 ## Optional Requirements (Recommended)
 > Please note that the following recommendations are based on what I use and is working for me, things could be different for other systems. In theory you don't need any of this to run training or replays.
@@ -25,7 +25,7 @@ Another attempt **(#2)** at creating a **Snake AI Agent** that is capable of fil
 
 ### **This guide assumes you are using Windows 10/11**
 
-> **This setup guide will also assume you run every command as written here**. With exceptions to those where you should be the one writting the command.
+> **This setup guide will also assume you run every command as written here**. With exceptions to those where you should be the one writing the command.
 
 > You should be able to just copy and paste most of these commands
 
@@ -209,7 +209,7 @@ That previously made repository was my first attempt at learning concepts in the
 
 *Quite ironic huh*.
 
-Don't get me wrong, the previous method already made a pretty cappable agent however, not good enough. You can check out [this LinkedIn post](https://www.linkedin.com/posts/tiago-laim_ai-reinforcementlearning-activity-7358916807518220288-yMyv?utm_source=share&utm_medium=member_desktop&rcm=ACoAAE_W0fYBrVrybKNltf4r7K6nzMGxUPRSza4) to see what I mean, even though it's not the latest version of the project, certainly was a successful one.
+Don't get me wrong, the previous method already made a pretty capable agent however, not good enough. You can check out [this LinkedIn post](https://www.linkedin.com/posts/tiago-laim_ai-reinforcementlearning-activity-7358916807518220288-yMyv?utm_source=share&utm_medium=member_desktop&rcm=ACoAAE_W0fYBrVrybKNltf4r7K6nzMGxUPRSza4) to see what I mean, even though it's not the latest version of the project, certainly was a successful one.
 
 Yet with the lack of observations the agent had, it could never achieve a completed board in a single run.
 
