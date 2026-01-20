@@ -10,14 +10,17 @@ class ActorCritic(nn.Module):
         # --- 1. SPATIAL PROCESSING (The Eyes) ---
         # Layer 1: 32 Filters. Finds edges, corners, food.
         # Kernel (3,3) means it looks at immediate neighbors.
-        x = nn.Conv(features=64, kernel_size=(3, 3), padding='SAME', dtype=jnp.float32)(x)
-        x = nn.relu(x)
-
-        x = nn.Conv(features=128, kernel_size=(3, 3), padding='SAME', dtype=jnp.float32)(x)
+        x = nn.Conv(features=32, kernel_size=(3, 3), padding='SAME', dtype=jnp.float32)(x)
         x = nn.relu(x)
 
         # Layer 2: 64 Filters. Finds patterns like "Head pointing at Wall".
-        # We double the features because combinations are more complex than raw pixels.x = nn.Conv(features=64, kernel_size=(3, 3), padding='SAME')(x)
+        # We double the features because combinations are more complex than raw pixels.
+        x = nn.Conv(features=32, kernel_size=(3, 3), padding='SAME', dtype=jnp.float32)(x)
+        x = nn.relu(x)
+
+        x = nn.Conv(features=64, kernel_size=(3, 3), padding='SAME', dtype=jnp.float32)(x)
+        x = nn.relu(x)
+
         x = nn.relu(x) 
         x = x.reshape((x.shape[0], -1)) 
         
