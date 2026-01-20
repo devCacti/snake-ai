@@ -17,9 +17,9 @@ class State(NamedTuple):
     body_buffer: jnp.ndarray
     
     # PHYSICS: Pointers for the Ring Buffer
-    head_idx: jnp.int32
-    tail_idx: jnp.int32
-    length: jnp.int32
+    head_idx: jnp.int32 # type: ignore
+    tail_idx: jnp.int32 # type: ignore
+    length: jnp.int32 # type: ignore
     
     # TRACKING: Head & Food positions for fast access
     head_pos: jnp.ndarray 
@@ -27,8 +27,8 @@ class State(NamedTuple):
     
     # GAME STATUS
     key: jnp.ndarray
-    done: jnp.bool_  # True if crashed
-    step_count: jnp.int32 # To prevent infinite loops
+    done: jnp.bool_  # type: ignore # True if crashed
+    step_count: jnp.int32 # type: ignore # To prevent infinite loops
 
 # --- 1. THE RESET FUNCTION ---
 def reset(key):
@@ -46,7 +46,7 @@ def reset(key):
     
     # C. Setup Grid
     # Channel 0 (Snake), Channel 1 (Food)
-    grid = jnp.zeros((GRID_SIZE, GRID_SIZE, 2), dtype=jnp.float32)
+    grid = jnp.zeros((GRID_SIZE, GRID_SIZE, 1), dtype=jnp.float32)
     # Paint the head on Channel 0
     grid = grid.at[head_pos[0], head_pos[1], 0].set(1.0)
     
@@ -54,7 +54,7 @@ def reset(key):
     # Simple logic: random pos. (Might overlap head, but rarely. We fix this in Step)
     food_pos = jax.random.randint(k2, shape=(2,), minval=0, maxval=GRID_SIZE)
     # Paint food on Channel 1
-    grid = grid.at[food_pos[0], food_pos[1], 1].set(1.0)
+    grid = grid.at[food_pos[0], food_pos[1], 0].set(-1.0)
 
     return State(
         grid=grid,
@@ -149,10 +149,10 @@ def step(state: State, action: int):
         jnp.where(hit_food, new_grid[tail_pos[0], tail_pos[1], 0], 0.0)
     )
     
+    new_grid = new_grid.at[state.food_pos[0], state.food_pos[1], 0].set(0.0)
+    
     # C. Paint the NEW Head (Always 1.0)
     new_grid = new_grid.at[safe_pos[0], safe_pos[1], 0].set(1.0)
-    
-    new_grid = new_grid.at[state.food_pos[0], state.food_pos[1], 1].set(0.0)
     
     # 2. Generate a new position ONLY if we ate
     key, subkey = jax.random.split(state.key)
@@ -182,7 +182,7 @@ def step(state: State, action: int):
     new_food_pos = jnp.where(hit_food, smart_food_pos, state.food_pos)
     
     # Paint the food on Channel 1
-    new_grid = new_grid.at[new_food_pos[0], new_food_pos[1], 1].set(1.0)
+    new_grid = new_grid.at[new_food_pos[0], new_food_pos[1], 0].set(-1.0)
 
     # --- 6. REWARDS (PRO VERSION) ---
     
@@ -204,7 +204,7 @@ def step(state: State, action: int):
     # 4. The "Grand Slam" (Win Condition)
     # If the snake fills the board (length >= 100), give massive payout.
     # We must override the 'done' penalty (-1.0) because winning also sets done=True!
-    board_area = 10 * 10
+    board_area = GRID_SIZE * GRID_SIZE
     is_win = (state.length >= board_area -1)
 
     done = done | is_win
