@@ -1,6 +1,24 @@
 # Snake AI
 
-Another attempt **(#2)** at creating an **AI Snake Agent** that is capable of filling an entire game board on its own.
+## Main Objectives
+
+### Learning the concepts
+
+The first main objective is to allow me, as a student, to learn machine learning concepts, especially Reinforcement Learning algorithms.
+
+Concepts like specific Neural Network sizes and types also have a place in this objective.
+
+## Secondary Objectives
+
+### Multi-sized Board Model
+
+I want to have this repository to have a model capable of playing any board size with the same model size and type. Even if it's just an average player. This would be one of the most difficult objectives to achieve and so, it's one of the biggest milestones. ([Milestone #2](https://github.com/devCacti/snake-ai/milestone/2))
+
+## Best trained version
+
+The best trained version of the Snake Agent should always appear on the `src/` folder, here should be the version most capable of executing an attempt at the objectives designated in this `README.md` file.
+
+This is another attempt **(no. 2)** at creating an **AI Snake Agent** that is capable of filling an entire game board on its own.
 
 **If you wish to run training on your computer, I recommend you make sure you have no thermal issues.**
 
@@ -194,7 +212,7 @@ With this simple command, training will start on its own, if you did everything 
 
 If you see errors, that means, either the backup isn't functional, which is not supposed to happen (after all, it's a backup) or there is something wrong with the set up. I could have skipped some steps, let me know if you can't do this.
 
-Also, make sure your GPU is the one being used and not the CPU, the CPU should be very chill and not doing much at all during training.
+Also, make sure your GPU is the one being used and not the CPU, the CPU shouldn't have high usage during training.
 
 ![GPU Usage during Training](git_images/gpu_usage_example.png)
 
