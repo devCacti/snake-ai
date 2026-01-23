@@ -1,54 +1,85 @@
 # dev/bridge_server.py
-# RUN THIS INSIDE WSL (Where JAX/GPU works)
-# pip install flask jax jaxlib flax numpy
-
-from flask import Flask, request, jsonify
+import socket
+import struct
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pickle
 from model import create_network
 
-app = Flask(__name__)
+# --- CONFIG ---
+HOST = '0.0.0.0'
+PORT = 5000
+# Grid shape matches your config: 12 rows, 20 cols
+GRID_SHAPE = (12, 20, 1) 
+EXPECTED_BYTES = 12 * 20 * 4  # 240 floats * 4 bytes each = 960 bytes
 
-# --- LOAD MODEL ---
-print("Loading Model in WSL...")
+print("Loading JAX Model...")
 model = create_network()
 
-# Load the parameters (ensure snake_params.pkl is in the same folder in WSL)
-with open("snake_params.pkl", "rb") as f:
-    params = pickle.load(f)
+try:
+    with open("snake_params.pkl", "rb") as f:
+        params = pickle.load(f)
+    print("Model Weights Loaded.")
+except FileNotFoundError:
+    print("CRITICAL ERROR: snake_params.pkl not found!")
+    exit(1)
 
-print("Model Loaded. GPU Enabled." if jax.default_backend() == "gpu" else "Model Loaded (CPU Mode).")
+# JIT Compile the inference function for max speed
+@jax.jit
+def infer(grid):
+    # grid: (12, 20, 1)
+    # Add batch dim -> (1, 12, 20, 1)
+    batched = jnp.expand_dims(grid, axis=0)
+    logits, _ = model.apply(params, batched)
+    return jnp.argmax(logits[0])
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    try:
-        # 1. Receive Grid from Windows
-        data = request.json
-        # Expecting a 2D list (e.g., 10x10)
-        grid_list = data.get("grid") 
+def start_server():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # Disable Nagle's algorithm (Waiting for data to buffer) -> Send IMMEDIATELY
+    server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    
+    server_socket.bind((HOST, PORT))
+    server_socket.listen(1)
+    
+    print(f"🚀 TCP Turbo Server listening on {HOST}:{PORT}")
+    
+    while True:
+        print("Waiting for client connection...")
+        conn, addr = server_socket.accept()
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        print(f"Connected by {addr}")
         
-        # 2. Convert to JAX Input Format
-        # Model expects: (Batch, Height, Width, Channels) -> (1, 10, 10, 1)
-        # The capture script sends 1s (Snake) and -1s (Food).
-        grid_np = np.array(grid_list, dtype=np.float32)
-        
-        # Reshape to (1, H, W, 1)
-        grid_jax = jnp.array(grid_np).reshape(1, grid_np.shape[0], grid_np.shape[1], 1)
-        
-        # 3. Inference
-        logits, _ = model.apply(params, grid_jax)
-        action = int(jnp.argmax(logits[0]))
-        
-        # 4. Return Action
-        # 0: Up, 1: Right, 2: Down, 3: Left
-        return jsonify({"action": action})
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"error": str(e)}), 500
+        try:
+            while True:
+                # 1. Receive Raw Data
+                # We expect exactly 960 bytes (the grid)
+                data = b''
+                while len(data) < EXPECTED_BYTES:
+                    packet = conn.recv(EXPECTED_BYTES - len(data))
+                    if not packet:
+                        raise ConnectionResetError
+                    data += packet
+                
+                # 2. Decode (Bytes -> Numpy)
+                # 'f' is float32
+                grid_flat = np.frombuffer(data, dtype=np.float32)
+                grid = grid_flat.reshape(GRID_SHAPE)
+                
+                # 3. Inference
+                action_idx = int(infer(grid))
+                
+                # 4. Reply (1 Byte)
+                # We send back a single integer byte (0, 1, 2, 3)
+                conn.sendall(action_idx.to_bytes(1, 'big'))
+                
+        except (ConnectionResetError, BrokenPipeError):
+            print("Client disconnected.")
+        except Exception as e:
+            print(f"Error: {e}")
+        finally:
+            conn.close()
 
 if __name__ == '__main__':
-    # Host 0.0.0.0 allows connections from the Windows host
-    app.run(host='0.0.0.0', port=5000)
+    start_server()
