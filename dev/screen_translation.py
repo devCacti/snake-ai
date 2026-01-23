@@ -5,15 +5,15 @@ import mss.tools
 import numpy as np
 import platform
 import socket
-import pyautogui
+import pyautogui #type: ignore
 import time
 import threading
 
-# --- CRITICAL: ZERO LATENCY INPUT ---
-pyautogui.PAUSE = 0.001 
+# --- ZERO LATENCY ---
+pyautogui.PAUSE = 0.0 
 
 # --- CONFIGURATION ---
-SERVER_IP = "localhost" # Or "127.0.0.1"
+SERVER_IP = "localhost"
 SERVER_PORT = 5000
 
 DEFAULT_CONFIG = {
@@ -21,11 +21,14 @@ DEFAULT_CONFIG = {
     "grid_cols": 20,       
     "offset_x": 40, "offset_y": 120,
     "spacing_x": 38, "spacing_y": 38,
+    
+    # --- COLORS (snake-game.io) ---
     "snake_head_color": [78, 124, 246], 
     "snake_tail_color": [25, 69, 161],  
     "food_color":       [229, 25, 26],  
+    
     "color_threshold": 50,          
-    "sample_radius": 2,
+    "sample_radius": 0,
     "zoom_factor": 1.0, 
     "auto_play": False,
     "debug_hitboxes": False
@@ -36,7 +39,7 @@ KEY_MAP = {0: 'up', 1: 'right', 2: 'down', 3: 'left'}
 class ScreenTranslationApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Snake AI | TCP Turbo Client")
+        self.root.title("Snake AI | Signal Boosted Client")
         self.root.geometry("1200x850")
         
         self.is_native_windows = platform.system() == "Windows"
@@ -49,15 +52,13 @@ class ScreenTranslationApp:
 
         self.config = DEFAULT_CONFIG.copy()
         self.sct = mss.mss()
-        self.sock = None # The TCP Socket
+        self.sock = None
         self.connected = False
         
         self.update_color_vectors()
         self.setup_ui()
         
-        # Start the network thread
         threading.Thread(target=self.network_loop, daemon=True).start()
-        
         self.update_loop()
 
     def update_color_vectors(self):
@@ -72,7 +73,7 @@ class ScreenTranslationApp:
         self.frame_left.pack(side=tk.LEFT, fill=tk.Y)
         self.frame_left.pack_propagate(False)
         
-        tk.Label(self.frame_left, text="AI TCP Vision", bg="#101010", fg="white", font=("Arial", 12, "bold")).pack(pady=10)
+        tk.Label(self.frame_left, text="AI Vision (Boosted)", bg="#101010", fg="white", font=("Arial", 12, "bold")).pack(pady=10)
         self.canvas_vis = tk.Canvas(self.frame_left, width=280, height=180, bg="black", highlightthickness=1, highlightbackground="#333")
         self.canvas_vis.pack(padx=20)
         
@@ -97,6 +98,7 @@ class ScreenTranslationApp:
 
     def setup_config_panel(self):
         tk.Label(self.frame_right, text="Configuration", bg="white", font=("Arial", 12, "bold")).pack(pady=10)
+        
         f_debug = tk.Frame(self.frame_right, bg="#eef", bd=1, relief="solid")
         f_debug.pack(fill=tk.X, padx=10, pady=5)
         
@@ -150,7 +152,7 @@ class ScreenTranslationApp:
         self.draw_overlay()
 
     def pick_color(self, key):
-        c = colorchooser.askcolor(color=tuple(self.config[key]))[0]
+        c = colorchooser.askcolor(color=tuple(self.config[key]))[0] #type: ignore
         if c: 
             self.config[key] = [int(x) for x in c]
             self.update_color_vectors() 
@@ -178,21 +180,25 @@ class ScreenTranslationApp:
     def calculate_gradient_value(self, detected_rgb):
         vec_to_pixel = detected_rgb - self.tail_vec
         t = np.dot(vec_to_pixel, self.body_vec) / (self.body_vec_len_sq + 1e-6)
-        return float(np.clip(t, 0.1, 1.0))
+        
+        # --- SIGNAL BOOSTING ---
+        # Remap [0.1 ... 1.0] -> [0.5 ... 1.0]
+        # This ensures the model sees the tail as a "Real Object" not noise
+        raw_val = float(np.clip(t, 0.1, 1.0))
+        boosted_val = 0.5 + (0.5 * raw_val)
+        
+        return boosted_val
 
     def network_loop(self):
-        """Persistent TCP connection manager"""
+        """Persistent TCP connection"""
         while True:
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1) # Disable Nagle
+                self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1) 
                 self.sock.connect((SERVER_IP, SERVER_PORT))
                 self.connected = True
                 self.root.after(0, lambda: self.lbl_status.config(text="Status: Connected (TCP)", fg="#00ff00"))
-                
-                while self.connected:
-                    time.sleep(1) # Keep thread alive, actual sending happens in update_loop
-                    
+                while self.connected: time.sleep(1)
             except Exception as e:
                 self.connected = False
                 self.root.after(0, lambda: self.lbl_status.config(text=f"Reconnecting... {e}", fg="red"))
@@ -217,7 +223,6 @@ class ScreenTranslationApp:
                 
                 final_grid = np.zeros((rows, cols), dtype=np.float32)
 
-                # --- FAST SCAN ---
                 for r in range(rows):
                     for c in range(cols):
                         px = int((ox + c * sx) * zoom)
@@ -230,10 +235,12 @@ class ScreenTranslationApp:
                         avg_bgra = np.mean(region, axis=(0,1))
                         avg_rgb = avg_bgra[::-1] 
 
+                        # Food check
                         if np.linalg.norm(avg_rgb - self.food_vec) < thresh:
                             final_grid[r, c] = -1.0
                             continue
                             
+                        # Body check
                         dist_head = np.linalg.norm(avg_rgb - self.head_vec)
                         dist_tail = np.linalg.norm(avg_rgb - self.tail_vec)
                         
@@ -241,7 +248,7 @@ class ScreenTranslationApp:
                             val = self.calculate_gradient_value(avg_rgb)
                             final_grid[r, c] = val
 
-                # --- DEBUG PROBE ---
+                # Debug Probe
                 d_px, d_py = int(ox * zoom), int(oy * zoom)
                 if d_py-rad >= 0 and d_px-rad >= 0 and d_py+rad < img.shape[0] and d_px+rad < img.shape[1]:
                     region = img[d_py-rad:d_py+rad+1, d_px-rad:d_px+rad+1, :3]
@@ -251,31 +258,24 @@ class ScreenTranslationApp:
                 
                 self.draw_model_view(final_grid)
                 
-                # --- SEND RAW BYTES (SYNC for lowest latency) ---
                 if self.config["auto_play"] and self.connected and self.sock:
-                    # 1. Send Grid (960 bytes)
                     try:
-                        data_bytes = final_grid.tobytes()
-                        self.sock.sendall(data_bytes)
-                        
-                        # 2. Receive Action (1 byte)
+                        self.sock.sendall(final_grid.tobytes())
                         response = self.sock.recv(1)
                         if response:
                             action = int.from_bytes(response, 'big')
                             key = KEY_MAP[action]
                             pyautogui.press(key)
-                            
-                            latency = int((time.time() - start_time) * 1000)
+                            lat = int((time.time() - start_time) * 1000)
                             self.lbl_prediction.config(text=f"Action: {key.upper()}", fg="#00ff00")
-                            self.lbl_latency.config(text=f"Ping: {latency}ms", fg="#00ff00" if latency < 40 else "#ff0000")
-                    except Exception as e:
-                        # print(e)
+                            self.lbl_latency.config(text=f"Ping: {lat}ms", fg="#00ff00" if lat < 40 else "#ff0000")
+                    except Exception:
                         self.connected = False
 
-        except Exception as e:
+        except Exception:
             pass
         
-        self.root.after(15, self.update_loop) # 60 FPS target
+        self.root.after(15, self.update_loop)
 
     def draw_model_view(self, grid):
         self.canvas_vis.delete("all")

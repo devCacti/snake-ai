@@ -20,7 +20,7 @@ from model import create_network
 import time
 
 # --- HYPERPARAMETERS ---
-TOTAL_STEPS = 10_000_000     
+TOTAL_STEPS = 50_000_000     
 NUM_ENVS = 128              
 STEPS_PER_EPOCH = 64        
 LEARNING_RATE = 3e-4        
