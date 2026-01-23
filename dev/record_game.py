@@ -1,9 +1,10 @@
 import jax
 import jax.numpy as jnp
-from snake_env import reset, step, GRID_SIZE
+# --- UPDATED IMPORT: Fetch X and Y dimensions separately ---
+from snake_env import reset, step, GRID_SIZE_X, GRID_SIZE_Y #type: ignore
 from model import create_network
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont  # <--- Added ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import pickle
 import time
 
@@ -34,27 +35,28 @@ def run_game_scan(params, rng_key):
 
 def save_gif(frames, filename="replay.gif"):
     print(f"Transferring {len(frames)} frames to CPU...")
-    frames_np = np.array(frames) # Shape (N, 10, 10, 1)
+    frames_np = np.array(frames) # Shape (N, H, W, 1)
     
     print("Rendering GIF with values...")
     pil_images = []
     
-    # Calculate cell size for the upscaled image (300 / 10 = 30px per block)
-    upscale_size = 300
-    cell_size = upscale_size // GRID_SIZE
+    # --- UPDATED SCALING LOGIC ---
+    # Instead of a fixed 300px square, we use a fixed pixel size per cell
+    CELL_PIXELS = 30
+    upscale_w = GRID_SIZE_X * CELL_PIXELS
+    upscale_h = GRID_SIZE_Y * CELL_PIXELS
     
-    # Optional: Load a font (default is fine, but this is cleaner)
     try:
-        # Try to load a standard font if available, else default
         font = ImageFont.load_default()
     except:
         font = None
 
     for grid in frames_np:
-        # grid shape is (10, 10, 1)
+        # grid shape is (Height, Width, 1)
         layer = grid[..., 0] 
         
-        img = np.zeros((GRID_SIZE, GRID_SIZE, 3), dtype=np.uint8)
+        # Create image with correct aspect ratio
+        img = np.zeros((GRID_SIZE_Y, GRID_SIZE_X, 3), dtype=np.uint8)
         
         # 1. RENDER SNAKE (Positive Values)
         snake_vals = np.maximum(layer, 0.0)
@@ -66,32 +68,28 @@ def save_gif(frames, filename="replay.gif"):
         img[is_food] = [255, 0, 0] # Set Red
         
         # 3. UPSCALE
-        pil_img = Image.fromarray(img).resize((upscale_size, upscale_size), resample=Image.NEAREST) #type: ignore
+        pil_img = Image.fromarray(img).resize((upscale_w, upscale_h), resample=Image.NEAREST) #type: ignore
         
         # 4. DRAW NUMBERS
         draw = ImageDraw.Draw(pil_img)
         
-        for y in range(GRID_SIZE):
-            for x in range(GRID_SIZE):
+        for y in range(GRID_SIZE_Y):
+            for x in range(GRID_SIZE_X):
                 val = layer[y, x]
                 
-                # Only draw if not 0.0 (Empty) to keep it clean
                 if abs(val) > 0.001:
-                    # Format: 2 decimal places (e.g., 0.99, -1.0)
                     text = f"{val:.2f}"
                     
-                    # Center the text in the 30x30 cell
-                    # (Simple centering logic)
-                    pos_x = x * cell_size + 2
-                    pos_y = y * cell_size + 10
+                    # Center text relative to the specific cell
+                    pos_x = x * CELL_PIXELS + 2
+                    pos_y = y * CELL_PIXELS + 10
                     
-                    # Draw White Text
                     draw.text((pos_x, pos_y), text, fill=(255, 255, 255), font=font)
 
         pil_images.append(pil_img)
         
-    pil_images[0].save(filename, save_all=True, append_images=pil_images[1:], duration=100, loop=0) # Slower duration (100ms) to read numbers
-    print(f"Saved to {filename}")
+    pil_images[0].save(filename, save_all=True, append_images=pil_images[1:], duration=100, loop=0)
+    print(f"Saved to {filename} ({upscale_w}x{upscale_h})")
 
 if __name__ == "__main__":
     print("Loading weights...")
@@ -103,13 +101,11 @@ if __name__ == "__main__":
     print(f"Playing Game Seed: {current_time_seed}")
     
     t0 = time.time()
-    # This will now return 5000 frames
     all_frames, all_dones = run_game_scan(params, key) 
     
     dones_np = np.array(all_dones)
     t1 = time.time()
     
-    # Logic to trim the empty tail of the video
     if np.any(dones_np):
         death_idx = np.argmax(dones_np)
         print(f"Game ended at step {death_idx + 1}!")

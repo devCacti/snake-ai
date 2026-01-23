@@ -3,17 +3,18 @@ import jax.numpy as jnp
 from typing import NamedTuple
 
 # --- CONFIGURATION ---
-GRID_SIZE = 10
-MAX_LEN = GRID_SIZE * GRID_SIZE
+GRID_SIZE_X = 20
+GRID_SIZE_Y = 12
+MAX_LEN = GRID_SIZE_X * GRID_SIZE_Y
 
 # --- THE "GOD TIER" STATE ---
 class State(NamedTuple):
     # VISUAL: The Grid seen by the Neural Network
-    # Shape: (10, 10, 2) -> Channel 0: Snake (0 or 1), Channel 1: Food (0 or 1)
+    # Shape: (12, 20, 1) -> Channel 0: Snake (+1) & Food (-1)
     grid: jnp.ndarray 
 
     # PHYSICS: The Ring Buffer tracking body coordinates
-    # Shape: (100, 2)
+    # Shape: (240, 2)
     body_buffer: jnp.ndarray
     
     # PHYSICS: Pointers for the Ring Buffer
@@ -21,7 +22,7 @@ class State(NamedTuple):
     tail_idx: jnp.int32 # type: ignore
     length: jnp.int32 # type: ignore
     
-    # TRACKING: Head & Food positions for fast access
+    # TRACKING: Head & Food positions for fast access (Y, X)
     head_pos: jnp.ndarray 
     food_pos: jnp.ndarray
     
@@ -35,25 +36,28 @@ def reset(key):
     k1, k2, k3 = jax.random.split(key, 3)
     
     # A. Setup Positions
-    # Start head somewhat centrally to avoid instant death
-    head_pos = jax.random.randint(k1, shape=(2,), minval=2, maxval=GRID_SIZE-2)
+    # We use array-based min/max to handle rectangular bounds (Y, X)
+    # Y range: [2, 10], X range: [2, 18]
+    min_bound = jnp.array([2, 2])
+    max_bound = jnp.array([GRID_SIZE_Y - 2, GRID_SIZE_X - 2])
+    
+    head_pos = jax.random.randint(k1, shape=(2,), minval=min_bound, maxval=max_bound)
     
     # B. Setup Buffer
-    # Create empty buffer
     body_buffer = jnp.zeros((MAX_LEN, 2), dtype=jnp.int32)
-    # Set the first slot (index 0) to be the head
     body_buffer = body_buffer.at[0].set(head_pos)
     
     # C. Setup Grid
-    # Channel 0 (Snake), Channel 1 (Food)
-    grid = jnp.zeros((GRID_SIZE, GRID_SIZE, 1), dtype=jnp.float32)
-    # Paint the head on Channel 0
+    # Shape is (Height, Width, Channels) -> (12, 20, 1)
+    grid = jnp.zeros((GRID_SIZE_Y, GRID_SIZE_X, 1), dtype=jnp.float32)
     grid = grid.at[head_pos[0], head_pos[1], 0].set(1.0)
     
     # D. Setup Food
-    # Simple logic: random pos. (Might overlap head, but rarely. We fix this in Step)
-    food_pos = jax.random.randint(k2, shape=(2,), minval=0, maxval=GRID_SIZE)
-    # Paint food on Channel 1
+    # Bounds for food: [0,0] to [12, 20]
+    food_max = jnp.array([GRID_SIZE_Y, GRID_SIZE_X])
+    food_pos = jax.random.randint(k2, shape=(2,), minval=0, maxval=food_max)
+    
+    # Paint food on Channel 0
     grid = grid.at[food_pos[0], food_pos[1], 0].set(-1.0)
 
     return State(
@@ -70,50 +74,32 @@ def reset(key):
     )
 
 # --- 2. THE STEP FUNCTION (With Auto-Reset) ---
-# snake_env.py
-
 def step(state: State, action: int):
     # --- 1. PREVENT 180 TURNS (The "Neck Check") ---
-    # We find where the "Neck" is (the segment before the head).
-    # Since head_idx points to the CURRENT head, head_idx - 1 is the NECK.
     neck_idx = (state.head_idx - 1) % MAX_LEN
     neck_pos = state.body_buffer[neck_idx]
     
-    # Calculate the move based on the action
+    # Action maps to (dy, dx)
     moves = jnp.array([[-1, 0], [0, 1], [1, 0], [0, -1]]) # Up, Right, Down, Left
     delta = moves[action]
     proposed_new_head = state.head_pos + delta
     
-    # Check if we are trying to reverse (Proposed Move lands exactly on Neck)
-    # Note: We need a special check for Length=1 (no neck), but our logic handles it 
-    # because if Length=1, neck_pos is same as head, so is_reverse is False.
     is_reverse = jnp.all(proposed_new_head == neck_pos)
-    
-    # If it is a reverse move, we IGNORE the action and keep current momentum.
-    # Current Momentum = Head - Neck
     current_momentum = state.head_pos - neck_pos
     
-    # If Length is 1, current_momentum is [0,0], so we accept the proposed move.
-    # If Length > 1 and is_reverse, we use momentum.
-    # Otherwise, we use the proposed move.
-    
-    # Robust logic:
-    # If is_reverse is True, it implies Length > 1.
     final_delta = jnp.where(is_reverse, current_momentum, delta)
     final_new_head = state.head_pos + final_delta
     
-    # --- 2. COLLISION CHECKS (Using the sanitized move) ---
-    hit_wall = (final_new_head < 0) | (final_new_head >= GRID_SIZE)
-    hit_wall = jnp.any(hit_wall)
+    # --- 2. COLLISION CHECKS ---
+    # Check Y bounds (0 to 11) and X bounds (0 to 19) separately
+    y, x = final_new_head[0], final_new_head[1]
+    hit_wall = (y < 0) | (y >= GRID_SIZE_Y) | (x < 0) | (x >= GRID_SIZE_X)
     
-    safe_pos = jnp.clip(final_new_head, 0, GRID_SIZE-1)
+    # Clip for safe indexing (even if dead)
+    max_vals = jnp.array([GRID_SIZE_Y - 1, GRID_SIZE_X - 1])
+    safe_pos = jnp.clip(final_new_head, 0, max_vals)
     
     # Check Self-Collision
-    # We check > 0.0 because of the gradient body.
-    # CRITICAL: The Neck is currently on the grid. We must ensure we don't 'collide' 
-    # with the neck if we are just moving away from it.
-    # However, since we already did the Neck Check above, `final_new_head` 
-    # is guaranteed NOT to be the neck. So any non-zero pixel is a valid collision.
     hit_self = state.grid[safe_pos[0], safe_pos[1], 0] > 0.0
     
     done = hit_wall | hit_self
@@ -127,89 +113,53 @@ def step(state: State, action: int):
     new_tail_idx = jnp.where(hit_food, state.tail_idx, (state.tail_idx + 1) % MAX_LEN)
     new_length = jnp.where(hit_food, state.length + 1, state.length)
 
-    # --- 5. VISUAL UPDATE (Gradient Body) ---
+    # --- 5. VISUAL UPDATE ---
     new_grid = state.grid
     
-    # A. Decay the old snake body (Subtract DECAY value)
-    # This creates the "Time Gradient" (Head=1.0, Tail=Small)
-    """DECAY VALUE EXPLANATION:
-    We want the tail to approximately reach 0.0 when the snake is at max length.
-    """
+    # A. Decay
     DECAY = 0.005
     snake_channel = new_grid[..., 0]
     decayed_snake = jnp.where(snake_channel > 0, snake_channel - DECAY, 0.0)
     new_grid = new_grid.at[..., 0].set(decayed_snake)
     decayed_snake = jnp.maximum(decayed_snake, 0.0)
     
-    # B. Clear the tail (if we didn't eat)
+    # B. Clear Tail
     tail_pos = state.body_buffer[state.tail_idx]
-
-    # If we ate, we keep the tail (snake grew). If not, clear it.
     new_grid = new_grid.at[tail_pos[0], tail_pos[1], 0].set(
         jnp.where(hit_food, new_grid[tail_pos[0], tail_pos[1], 0], 0.0)
     )
     
     new_grid = new_grid.at[state.food_pos[0], state.food_pos[1], 0].set(0.0)
     
-    # C. Paint the NEW Head (Always 1.0)
+    # C. Paint New Head
     new_grid = new_grid.at[safe_pos[0], safe_pos[1], 0].set(1.0)
     
-    # 2. Generate a new position ONLY if we ate
+    # D. Spawn New Food (If Ate)
     key, subkey = jax.random.split(state.key)
     
-    # --- SMART SPAWN LOGIC START ---
-    # We flatten the grid to 1D (size 100) to choose an index.
-    # We look at Channel 0 (Snake Body). Any pixel > 0 is occupied.
     flat_body = new_grid[..., 0].ravel()
-    
-    # Create logits: 
-    # If occupied (> 0), logit is -1e9 (Impossible).
-    # If empty (== 0), logit is 1.0 (Possible).
     candidate_logits = jnp.where(flat_body > 0, -1e9, 1.0)
-    
-    # Sample a valid index from the empty spots
-    # jax.random.categorical is robust and efficient here.
     new_food_idx = jax.random.categorical(subkey, candidate_logits)
     
-    # Convert 1D index back to (y, x)
-    new_food_y = new_food_idx // GRID_SIZE
-    new_food_x = new_food_idx % GRID_SIZE
+    # Convert 1D index -> 2D (Y, X)
+    # Integer division by WIDTH gives Row (Y)
+    new_food_y = new_food_idx // GRID_SIZE_X 
+    new_food_x = new_food_idx % GRID_SIZE_X
     smart_food_pos = jnp.array([new_food_y, new_food_x])
-    # --- SMART SPAWN LOGIC END ---
 
-    # Only apply the new position if we actually hit the food.
-    # Otherwise, keep the old position.
     new_food_pos = jnp.where(hit_food, smart_food_pos, state.food_pos)
-    
-    # Paint the food on Channel 1
     new_grid = new_grid.at[new_food_pos[0], new_food_pos[1], 0].set(-1.0)
 
-    # --- 6. REWARDS (PRO VERSION) ---
-    
-    # 1. Base Time Penalty (The "Tax" for living)
-    # Encourages efficiency.
+    # --- 6. REWARDS ---
     reward = -0.01 
-    
-    # 2. Death Penalty
-    # If done (and not a win), we punish heavily.
-    # Note: We will handle the "Win" case below so we don't punish winning.
     reward = jnp.where(done, -1.0, reward)
     
-    # 3. Scaled Food Reward (The "Gourmet")
-    # Base 1.0 + (0.01 * length). 
-    # Example: Length 10 -> +1.1 | Length 90 -> +1.9
-    food_value = 1.0 # + (state.length * 0.01)
+    food_value = 1.0 
     reward = jnp.where(hit_food, food_value, reward)
     
-    # 4. The "Grand Slam" (Win Condition)
-    # If the snake fills the board (length >= 100), give massive payout.
-    # We must override the 'done' penalty (-1.0) because winning also sets done=True!
-    board_area = GRID_SIZE * GRID_SIZE
-    is_win = (state.length >= board_area -1)
-
+    board_area = GRID_SIZE_X * GRID_SIZE_Y
+    is_win = (state.length >= board_area - 1)
     done = done | is_win
-    
-    # Override: If we won, the reward is +10.0 (not -1.0)
     reward = jnp.where(is_win, 10.0, reward)
     
     next_state = State(
@@ -239,20 +189,16 @@ def step(state: State, action: int):
 
 step_batch = jax.vmap(step, in_axes=(0, 0))
 
-# --- TEST IT ---
 if __name__ == "__main__":
-    # Compile the reset function for speed
     reset_fast = jax.jit(reset)
     step_fast = jax.jit(step)
     
-    # Create 1 Game to test logic
     key = jax.random.PRNGKey(0)
     state = reset_fast(key)
     
+    print(f"Grid Shape: {state.grid.shape}")
     print("Initial Head:", state.head_pos)
     print("Initial Food:", state.food_pos)
     
-    # Move Right (Action 1)
     state, reward, done = step_fast(state, 1)
     print("New Head:", state.head_pos)
-    print("Grid Value at Head:", state.grid[state.head_pos[0], state.head_pos[1], 0])

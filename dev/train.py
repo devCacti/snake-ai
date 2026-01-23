@@ -1,6 +1,5 @@
 import os
 
-
 #os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 #os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".60"
 #os.environ["XLA_FLAGS"] = "--xla_gpu_strict_conv_algorithm_picker=false"
@@ -11,29 +10,30 @@ import os
 #    " --xla_gpu_strict_conv_algorithm_picker=false"
 #)
 
-
 import jax
 import jax.numpy as jnp
 import optax
 from flax.training.train_state import TrainState # type: ignore
-from snake_env import reset, step_batch as step, GRID_SIZE
+# --- UPDATED IMPORT: Fetch X and Y dimensions separately ---
+from snake_env import reset, step_batch as step, GRID_SIZE_X, GRID_SIZE_Y #type: ignore
 from model import create_network
 import time
+
 # --- HYPERPARAMETERS ---
-TOTAL_STEPS = 250_000_000     # Increased from 500k to 5M (Standard for PPO)
-NUM_ENVS = 256              # Increased from 512 for better batch stats
-STEPS_PER_EPOCH = 64        # Shorter rollouts (was 128)
-LEARNING_RATE = 3e-4        # Slightly higher for CNN
+TOTAL_STEPS = 5_000_000     
+NUM_ENVS = 128              
+STEPS_PER_EPOCH = 64        
+LEARNING_RATE = 3e-4        
 GAMMA = 0.999
 GAE_LAMBDA = 0.95
-ENTROPY_COEF = 0.02         # Higher entropy to prevent "spinning in circles"
+ENTROPY_COEF = 0.02         
 CRITIC_COEF = 0.5
 
 # --- NEW PPO CONFIGURATION ---
-PPO_EPOCHS = 2              # Number of times to reuse data (Default: 4)
-NUM_MINIBATCHES = 4         # Split batch into 8 chunks for stability (Default: 8)
+PPO_EPOCHS = 2              
+NUM_MINIBATCHES = 4         
 
-# Calculated Batch Sizes (Add this so the code knows how to split)
+# Calculated Batch Sizes
 BATCH_SIZE = NUM_ENVS * STEPS_PER_EPOCH
 MINIBATCH_SIZE = BATCH_SIZE // NUM_MINIBATCHES
 NUM_UPDATES = TOTAL_STEPS // BATCH_SIZE
@@ -41,17 +41,16 @@ NUM_UPDATES = TOTAL_STEPS // BATCH_SIZE
 class TrainState(TrainState): # type: ignore
     key: jax.Array
 
-
 def get_obs(state):
-    # Returns shape (Batch, 10, 10, 2)
+    # Returns shape (Batch, Height, Width, Channels) -> (Batch, 12, 20, 1)
     return state.grid.astype(jnp.float32)
 
 def create_train_state(rng, learning_rate):
     model = create_network()
     
-    # OLD: dummy_input = jnp.zeros((1, 4))
-    # NEW: Dummy input matches the Grid Shape (Batch, 10, 10, 2)
-    dummy_input = jnp.zeros((1, GRID_SIZE, GRID_SIZE, 1)) 
+    # --- UPDATED: Dummy input uses separate Y (Height) and X (Width) ---
+    # Shape: (Batch, Height, Width, Channels)
+    dummy_input = jnp.zeros((1, GRID_SIZE_Y, GRID_SIZE_X, 1)) 
     
     params = model.init(rng, dummy_input)
     tx = optax.adam(learning_rate)
@@ -74,9 +73,7 @@ def rollout(train_state, env_state):
         # 3. Step
         next_e_state, reward, done = step(e_state, action) # type: ignore
         
-        # --- CRITICAL FIX: Time Penalty ---
         # Penalize existing (-0.01) so it wants to eat FAST.
-        # If it just dances up/down, it will lose points.
         reward = reward - 0.01
         
         t_state = t_state.replace(key=key)
@@ -96,9 +93,6 @@ def rollout(train_state, env_state):
 def calculate_gae(transitions, last_val):
     _, _, rewards, dones, values, _ = transitions
     
-    # --- CRITICAL FIX ---
-    # Only remove the last dimension (axis=-1).
-    # This preserves the Batch dimension (e.g., shape (1,)) so it matches 'rewards'.
     last_val = last_val.squeeze(axis=-1)
     values = values.squeeze(axis=-1)
     
@@ -151,9 +145,6 @@ def run_training():
     env_keys = jax.random.split(env_rng, NUM_ENVS)
     env_state = jax.vmap(reset)(env_keys)
     
-    # Define the Training Epoch
-# ... inside run_training() ...
-
     def train_epoch(carry, _):
         t_state, e_state = carry
         
@@ -168,19 +159,18 @@ def run_training():
         # Flatten (Time, Batch, ...) -> (Time * Batch, ...)
         def flatten(x): return x.reshape((BATCH_SIZE, -1))
         
-        # Note: We reshape obs to (Batch_Size, 10, 10, 2) for the CNN
+        # --- UPDATED: Reshape obs to (Batch_Size, Height, Width, Channels) ---
         traj_batch = (
-            obs.reshape((BATCH_SIZE, GRID_SIZE, GRID_SIZE, 1)), 
+            obs.reshape((BATCH_SIZE, GRID_SIZE_Y, GRID_SIZE_X, 1)), 
             flatten(actions).squeeze(),
             flatten(advantages).squeeze(),
             flatten(targets).squeeze(),
             flatten(old_log_probs).squeeze()
         )
         
-        # 4. PPO UPDATE LOOPS (The New Logic)
+        # 4. PPO UPDATE LOOPS
         key, subkey = jax.random.split(t_state.key)
         t_state = t_state.replace(key=key)
-
 
         def ppo_epoch_scan(state_carry, _):
             tt_state, key = state_carry
@@ -192,16 +182,8 @@ def run_training():
             # B. Minibatch Loop
             def minibatch_scan(curr_t_state, i):
                 start_idx = i * MINIBATCH_SIZE
-                
-                # --- THE FIX IS HERE ---
-                # OLD (Broken): idxs = permutation[start_idx : start_idx + MINIBATCH_SIZE]
-                # NEW (Fixed): Use dynamic_slice for runtime indices
                 idxs = jax.lax.dynamic_slice(permutation, (start_idx,), (MINIBATCH_SIZE,))
-                
-                # Gather minibatch data 
-                # (Smart Indexing works fine with dynamic indices, so this line is safe)
                 minibatch = tuple(x[idxs] for x in traj_batch)
-                
                 return update_step(curr_t_state, minibatch)
 
             tt_state, _ = jax.lax.scan(minibatch_scan, tt_state, jnp.arange(NUM_MINIBATCHES))
@@ -211,6 +193,7 @@ def run_training():
         (t_state, _), _ = jax.lax.scan(ppo_epoch_scan, (t_state, subkey), None, length=PPO_EPOCHS)
         
         return (t_state, e_state), jnp.mean(rewards)
+
     # Compile the loop
     print("Compiling...")
     train_scan = jax.jit(lambda t, e: jax.lax.scan(train_epoch, (t, e), None, length=NUM_UPDATES))
@@ -221,7 +204,6 @@ def run_training():
     
     (final_state, _), rewards = train_scan(train_state, env_state)
     
-    # IMPORTANT: Force JAX to finish all math before stopping the clock
     rewards.block_until_ready()
     end = time.time()
     
@@ -230,12 +212,10 @@ def run_training():
     steps_per_sec = TOTAL_STEPS / duration
     
     print(f"Done in {duration:.2f}s")
-    print(f"Steps/Sec: {steps_per_sec:,.0f}")  # <--- HERE IS YOUR STATUS
+    print(f"Steps/Sec: {steps_per_sec:,.0f}") 
     print(f"Final Reward: {rewards[-1]:.3f}")
     
     return final_state
-
-
 
 if __name__ == "__main__":
     state = run_training()
